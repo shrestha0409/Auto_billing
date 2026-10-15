@@ -174,8 +174,10 @@ app.post('/api/bills/generate-pdf', (req, res) => {
       customer = {},
       products = [],
       items = [],
+      shippingCharge = 0,
     } = req.body;
 
+    const parsedShipping = Math.max(0, Number(shippingCharge) || 0);
     const finalOrderNo = orderNumber || orderNo || 'ORD12345';
     const rawProducts = Array.isArray(products) && products.length > 0
       ? products
@@ -204,7 +206,7 @@ app.post('/api/bills/generate-pdf', (req, res) => {
     });
 
     const tax = subtotal * 0.18; // Exactly 18% requirement
-    const grandTotal = subtotal + tax;
+    const grandTotal = subtotal + tax + parsedShipping;
 
     const uniqueFilename = generateInvoiceFilename(invoiceNumber);
 
@@ -493,14 +495,14 @@ app.post('/api/bills/generate-pdf', (req, res) => {
     const totalsX = rightMargin - totalsWidth;
     const totalsLabelWidth = 140;
     const totalsValueWidth = 90;
-    const totalsRowHeight = 24;
+    const totalsRowHeight = 22;
 
     // Subtotal Row
     doc.rect(totalsX, totalsY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
     doc.moveTo(totalsX + totalsLabelWidth, totalsY).lineTo(totalsX + totalsLabelWidth, totalsY + totalsRowHeight).stroke();
     doc.font(fontSansBold).fontSize(9).fillColor('#000000');
-    doc.text('Subtotal', totalsX + 10, totalsY + 7);
-    doc.font(fontSans).text(formatCurrency(subtotal), totalsX + totalsLabelWidth - 10, totalsY + 7, {
+    doc.text('Subtotal', totalsX + 10, totalsY + 6);
+    doc.font(fontSans).text(formatCurrency(subtotal), totalsX + totalsLabelWidth - 10, totalsY + 6, {
       width: totalsValueWidth,
       align: 'right',
     });
@@ -510,26 +512,37 @@ app.post('/api/bills/generate-pdf', (req, res) => {
     doc.rect(totalsX, taxY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
     doc.moveTo(totalsX + totalsLabelWidth, taxY).lineTo(totalsX + totalsLabelWidth, taxY + totalsRowHeight).stroke();
     doc.font(fontSansBold).fontSize(9).fillColor('#000000');
-    doc.text('Total Tax (18%)', totalsX + 10, taxY + 7);
-    doc.font(fontSans).text(formatCurrency(tax), totalsX + totalsLabelWidth - 10, taxY + 7, {
+    doc.text('Total Tax (18%)', totalsX + 10, taxY + 6);
+    doc.font(fontSans).text(formatCurrency(tax), totalsX + totalsLabelWidth - 10, taxY + 6, {
+      width: totalsValueWidth,
+      align: 'right',
+    });
+
+    // Shipping (0% GST) Row
+    const shippingY = taxY + totalsRowHeight;
+    doc.rect(totalsX, shippingY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+    doc.moveTo(totalsX + totalsLabelWidth, shippingY).lineTo(totalsX + totalsLabelWidth, shippingY + totalsRowHeight).stroke();
+    doc.font(fontSansBold).fontSize(9).fillColor('#000000');
+    doc.text('Shipping (0% GST)', totalsX + 10, shippingY + 6);
+    doc.font(fontSans).text(formatCurrency(parsedShipping), totalsX + totalsLabelWidth - 10, shippingY + 6, {
       width: totalsValueWidth,
       align: 'right',
     });
 
     // Grand Total (₹) Row with light gray fill
-    const grandY = taxY + totalsRowHeight;
+    const grandY = shippingY + totalsRowHeight;
     doc.rect(totalsX, grandY, totalsWidth, totalsRowHeight).fill('#e8e8e8');
     doc.rect(totalsX, grandY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
     doc.moveTo(totalsX + totalsLabelWidth, grandY).lineTo(totalsX + totalsLabelWidth, grandY + totalsRowHeight).stroke();
     doc.font(fontSansBold).fontSize(9.5).fillColor('#000000');
-    doc.text('Grand Total (₹)', totalsX + 10, grandY + 7);
-    doc.text(formatCurrency(grandTotal), totalsX + totalsLabelWidth - 10, grandY + 7, {
+    doc.text('Grand Total (₹)', totalsX + 10, grandY + 6);
+    doc.text(formatCurrency(grandTotal), totalsX + totalsLabelWidth - 10, grandY + 6, {
       width: totalsValueWidth,
       align: 'right',
     });
 
     // Amount in Words on Bottom Left
-    const wordsY = totalsY + 22;
+    const wordsY = totalsY + 16;
     doc.font(fontSansBold).fontSize(9).fillColor('#000000').text('Amount in Words:', leftMargin, wordsY);
     const wordsText = numberToIndianWords(grandTotal);
     doc.font(fontSans).fontSize(8.5).fillColor('#222222').text(wordsText, leftMargin, wordsY + 14, {

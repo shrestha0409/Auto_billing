@@ -176,6 +176,12 @@ body {
   color: var(--accent-cyan);
 }
 
+.tab-badge.zero-gst {
+  background: #ecfdf5;
+  color: #047857;
+  border: 1px solid #a7f3d0;
+}
+
 .tab-badge.count {
   background: var(--bg-muted);
   color: var(--text-secondary);
@@ -424,6 +430,16 @@ body {
   border-radius: var(--radius-md);
   color: var(--accent-cyan);
   font-weight: 600;
+}
+
+.summary-row.shipping-highlight {
+  background: #f0fdf4;
+  padding: 0.55rem 0.85rem;
+  margin: 0.35rem -0.85rem;
+  border-radius: var(--radius-md);
+  color: #065f46;
+  font-weight: 600;
+  border: 1px dashed #a7f3d0;
 }
 
 .summary-divider {

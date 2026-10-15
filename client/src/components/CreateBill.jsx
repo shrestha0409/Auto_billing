@@ -101,6 +101,9 @@ export default function CreateBill() {
     { id: 3, productName: 'Product 3', hsn: 'XXXX', quantity: 1, unitPrice: 200 },
   ]);
 
+  // 5. Shipping Charge (with 0% GST)
+  const [shippingCharge, setShippingCharge] = useState(0);
+
   const [isGenerating, setIsGenerating] = useState(false);
   const [notification, setNotification] = useState(null);
 
@@ -171,8 +174,13 @@ export default function CreateBill() {
     return products.reduce((acc, p) => acc + (Number(p.quantity) || 0) * (Number(p.unitPrice) || 0), 0);
   }, [products]);
 
+  const parsedShipping = useMemo(() => {
+    const val = parseFloat(shippingCharge);
+    return isNaN(val) || val < 0 ? 0 : val;
+  }, [shippingCharge]);
+
   const tax = useMemo(() => subtotal * 0.18, [subtotal]);
-  const grandTotal = useMemo(() => subtotal + tax, [subtotal, tax]);
+  const grandTotal = useMemo(() => subtotal + tax + parsedShipping, [subtotal, tax, parsedShipping]);
   const amountInWords = useMemo(() => numberToIndianWords(grandTotal), [grandTotal]);
 
   // Handle PDF Generation and Download
@@ -210,6 +218,7 @@ export default function CreateBill() {
             }
           : shipTo,
         products,
+        shippingCharge: parsedShipping,
         subtotal,
         tax,
         grandTotal,
@@ -695,15 +704,96 @@ export default function CreateBill() {
               </tbody>
             </table>
           </div>
+        </div>
 
-          {/* Section 5 & 6: Totals and Amount in Words */}
-          <div className="grid-2" style={{ marginTop: '1.5rem', alignItems: 'flex-start' }}>
+        {/* Section 5: Shipping Charge (0% GST) */}
+        <div className="panel-card">
+          <div className="panel-header" style={{ alignItems: 'center' }}>
+            <div>
+              <h2 className="panel-title">5. Shipping Charge</h2>
+              <p className="panel-subtitle">Delivery and courier charges (Exempt from GST / 0% GST)</p>
+            </div>
+            <div className="tab-badge zero-gst" style={{ display: 'inline-flex', alignItems: 'center', gap: '5px', padding: '4px 10px' }}>
+              <span>✓</span> 0% GST (Tax Exempt)
+            </div>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', alignItems: 'center' }}>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label" htmlFor="shipping-charge">
+                Shipping / Delivery Charge (₹)
+              </label>
+              <div style={{ position: 'relative' }}>
+                <span
+                  style={{
+                    position: 'absolute',
+                    left: '12px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    fontWeight: 700,
+                    color: 'var(--text-secondary)',
+                    pointerEvents: 'none',
+                  }}
+                >
+                  ₹
+                </span>
+                <input
+                  id="shipping-charge"
+                  className="form-input"
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  style={{ paddingLeft: '28px', fontSize: '1.05rem', fontWeight: 600 }}
+                  placeholder="0.00"
+                  value={shippingCharge}
+                  onChange={(e) => setShippingCharge(e.target.value)}
+                />
+              </div>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
+                0% GST is applied to shipping charges. Enter 0 if shipping is free or not applicable.
+              </span>
+            </div>
+
+            <div
+              style={{
+                background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
+                border: '1px solid var(--success-border)',
+                borderRadius: 'var(--radius-md)',
+                padding: '0.9rem 1.15rem',
+                display: 'flex',
+                gap: '0.75rem',
+                alignItems: 'flex-start',
+              }}
+            >
+              <div style={{ fontSize: '1.35rem', lineHeight: 1, marginTop: '2px' }}>🚚</div>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: '0.875rem', color: '#065f46', marginBottom: '0.15rem' }}>
+                  Zero-Rated Shipping (0% GST)
+                </div>
+                <div style={{ fontSize: '0.8rem', color: '#047857', lineHeight: 1.4 }}>
+                  This amount is added directly to the Grand Total with <strong>₹ 0.00 GST</strong>. Standard 18% GST applies strictly to the product subtotal.
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Section 6: Bill Summary & Amount in Words */}
+        <div className="panel-card">
+          <div className="panel-header">
+            <div>
+              <h2 className="panel-title">6. Bill Summary & Grand Total</h2>
+              <p className="panel-subtitle">Official totals breakdown and final amount payable</p>
+            </div>
+          </div>
+
+          <div className="grid-2" style={{ alignItems: 'flex-start' }}>
             {/* Amount in Words */}
             <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-main)' }}>
               <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.4rem', color: 'var(--text-main)' }}>
                 Amount in Words:
               </div>
-              <div style={{ fontSize: '0.95rem', color: '#1e293b', fontStyle: 'italic', fontWeight: 500 }}>
+              <div style={{ fontSize: '0.95rem', color: '#1e293b', fontStyle: 'italic', fontWeight: 500, lineHeight: 1.5 }}>
                 {amountInWords}
               </div>
             </div>
@@ -711,13 +801,21 @@ export default function CreateBill() {
             {/* Official Totals Box */}
             <div className="bill-summary-card">
               <div className="summary-row">
-                <span style={{ fontWeight: 600 }}>Subtotal:</span>
+                <span style={{ fontWeight: 600 }}>Products Subtotal:</span>
                 <strong>₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
               </div>
 
               <div className="summary-row tax-highlight">
-                <span>Total Tax (18%):</span>
+                <span>Total Tax (18% GST):</span>
                 <span>₹ {tax.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+              </div>
+
+              <div className="summary-row shipping-highlight">
+                <span style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span>Shipping (0% GST):</span>
+                  <span className="tab-badge zero-gst" style={{ fontSize: '0.65rem' }}>0% GST</span>
+                </span>
+                <strong>₹ {parsedShipping.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
               </div>
 
               <div className="summary-divider"></div>
