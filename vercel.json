@@ -2,6 +2,11 @@
   "version": 2,
   "buildCommand": "cd client && npm install && npm run build",
   "outputDirectory": "client/dist",
+  "functions": {
+    "api/index.js": {
+      "includeFiles": "node_modules/pdfkit/js/standard-fonts/**"
+    }
+  },
   "rewrites": [
     {
       "source": "/api/(.*)",
