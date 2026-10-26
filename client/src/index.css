@@ -649,3 +649,467 @@ body {
 .animate-fade-in {
   animation: fadeIn 0.25s ease-out forwards;
 }
+
+/* -------------------------------------------------------------
+ * Responsive Layout Classes (Banner, Metadata, Shipping, Summary)
+ * ------------------------------------------------------------- */
+.ekora-banner {
+  background: #fafbfc;
+  border-left: 4px solid #000;
+}
+
+.ekora-banner-inner {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+
+.ekora-banner-logo {
+  width: 56px;
+  height: 56px;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.ekora-banner-title {
+  font-family: var(--font-heading);
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0;
+  line-height: 1.25;
+}
+
+.ekora-banner-subtitle {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.metadata-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1.25rem;
+}
+
+.shipping-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  align-items: center;
+}
+
+.shipping-info-banner {
+  background: linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%);
+  border: 1px solid var(--success-border);
+  border-radius: var(--radius-md);
+  padding: 0.9rem 1.15rem;
+  display: flex;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
+
+.summary-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+  align-items: flex-start;
+}
+
+.amount-words-card {
+  background: #f8fafc;
+  padding: 1.25rem;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-main);
+}
+
+.action-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-top: 1.5rem;
+  margin-bottom: 3rem;
+}
+
+.btn-generate-pdf {
+  padding: 0.85rem 2.25rem;
+  font-size: 1.05rem;
+}
+
+/* -------------------------------------------------------------
+ * Dual View Products: Desktop Table vs Mobile Product Cards
+ * ------------------------------------------------------------- */
+.desktop-table-view {
+  display: block;
+}
+
+.mobile-card-view {
+  display: none;
+}
+
+.items-table {
+  min-width: 620px;
+}
+
+/* Mobile Product Card Styles (<640px) */
+.mobile-product-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  padding: 1rem;
+  box-shadow: var(--shadow-sm);
+  transition: all 0.15s ease;
+}
+
+.mobile-product-card:focus-within {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+
+.mobile-product-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+  padding-bottom: 0.45rem;
+  border-bottom: 1px dashed var(--border-main);
+}
+
+.mobile-product-index-badge {
+  font-family: var(--font-heading);
+  font-weight: 700;
+  font-size: 0.82rem;
+  background: var(--bg-subtle);
+  color: var(--primary);
+  padding: 2px 8px;
+  border-radius: var(--radius-sm);
+}
+
+.btn-icon-only {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1rem;
+  border-radius: var(--radius-sm);
+}
+
+.mobile-product-inputs-grid {
+  display: grid;
+  grid-template-columns: 75px 1fr 95px;
+  gap: 0.6rem;
+  align-items: flex-end;
+  margin-bottom: 0.75rem;
+}
+
+.mobile-product-card-totals {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #f8fafc;
+  padding: 0.6rem 0.8rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-main);
+  font-size: 0.8rem;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.mobile-calc-item {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.mobile-calc-label {
+  color: var(--text-secondary);
+}
+
+.mobile-calc-value {
+  color: var(--text-main);
+  font-weight: 600;
+}
+
+.mobile-calc-highlight {
+  background: #eff6ff;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.mobile-calc-highlight .bold {
+  color: var(--primary);
+  font-weight: 700;
+}
+
+/* -------------------------------------------------------------
+ * COMPREHENSIVE RESPONSIVE MEDIA QUERIES
+ * ------------------------------------------------------------- */
+
+/* Tablet & Smaller (<= 1024px) */
+@media (max-width: 1024px) {
+  .header-inner {
+    padding: 0.85rem 1.25rem;
+  }
+  .main-content {
+    padding: 1.5rem 1.25rem;
+  }
+}
+
+/* Mobile & Small Tablets (<= 768px) */
+@media (max-width: 768px) {
+  html, body {
+    overflow-x: hidden;
+    width: 100%;
+  }
+
+  /* Header stays accessible without stealing screen height */
+  .app-header {
+    position: relative;
+    backdrop-filter: none;
+    background: #ffffff;
+  }
+
+  .header-inner {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 0.85rem 1rem;
+    gap: 0.85rem;
+  }
+
+  .brand {
+    justify-content: flex-start;
+  }
+
+  .brand-icon {
+    width: 36px;
+    height: 36px;
+    font-size: 1.15rem;
+  }
+
+  .brand-info h1 {
+    font-size: 1.2rem;
+  }
+
+  .brand-info p {
+    font-size: 0.7rem;
+  }
+
+  /* Horizontal scrolling navigation tabs with no overflow */
+  .tab-navigation {
+    width: 100%;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    display: flex;
+    flex-wrap: nowrap;
+    padding: 3px;
+    gap: 4px;
+  }
+
+  .tab-navigation::-webkit-scrollbar {
+    display: none;
+  }
+
+  .nav-tab-btn {
+    flex: 1 0 auto;
+    padding: 0.55rem 0.85rem;
+    font-size: 0.8125rem;
+    min-height: 42px;
+    justify-content: center;
+  }
+
+  /* Main Container Padding */
+  .main-content {
+    padding: 1rem 0.85rem;
+  }
+
+  /* Cards responsive spacing */
+  .panel-card {
+    padding: 1.15rem 1rem;
+    margin-bottom: 1rem;
+    border-radius: var(--radius-md);
+  }
+
+  .panel-header {
+    margin-bottom: 1rem;
+    padding-bottom: 0.75rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.6rem;
+  }
+
+  .panel-title {
+    font-size: 1.1rem;
+  }
+
+  .panel-subtitle {
+    font-size: 0.78rem;
+  }
+
+  /* Single Column Layouts on Mobile */
+  .grid-2, .grid-3 {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .metadata-grid {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .shipping-grid {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .summary-grid {
+    grid-template-columns: 1fr;
+    gap: 1rem;
+  }
+
+  .bill-summary-card {
+    max-width: 100%;
+    margin-left: 0;
+    width: 100%;
+    padding: 1.15rem 1rem;
+  }
+
+  /* Full-width mobile action button */
+  .action-bar {
+    justify-content: stretch;
+    margin-top: 1.25rem;
+    margin-bottom: 2.25rem;
+  }
+
+  .btn-generate-pdf {
+    width: 100%;
+    padding: 0.95rem 1.25rem;
+    font-size: 1rem;
+    min-height: 48px;
+  }
+
+  /* Prevent iOS Safari auto-zoom by enforcing 16px font-size */
+  .form-input, .form-textarea, .form-select {
+    font-size: 16px;
+    padding: 0.65rem 0.75rem;
+    min-height: 44px;
+  }
+
+  /* File Uploader on mobile */
+  .dropzone-container {
+    padding: 2rem 1rem;
+    border-radius: var(--radius-lg);
+  }
+
+  .dropzone-icon {
+    width: 52px;
+    height: 52px;
+    font-size: 1.4rem;
+    margin-bottom: 0.75rem;
+  }
+
+  .dropzone-title {
+    font-size: 1.05rem;
+  }
+
+  .dropzone-subtitle {
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+  }
+
+  .selected-file-card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.85rem;
+  }
+
+  .selected-file-actions {
+    display: flex;
+    width: 100%;
+    gap: 0.5rem;
+  }
+
+  .selected-file-actions .btn {
+    flex: 1;
+    min-height: 42px;
+  }
+
+  .vault-item {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+  }
+
+  .vault-item-actions {
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px dashed var(--border-main);
+    padding-top: 0.5rem;
+  }
+}
+
+/* Smartphone breakpoint (<= 640px) */
+@media (max-width: 640px) {
+  /* Toggle from table to mobile cards */
+  .desktop-table-view {
+    display: none;
+  }
+
+  .mobile-card-view {
+    display: flex;
+    flex-direction: column;
+    gap: 0.85rem;
+  }
+
+  .csp-grid {
+    grid-template-columns: 1fr;
+    gap: 0.85rem;
+  }
+
+  .ekora-banner-title {
+    font-size: 1.05rem;
+  }
+
+  .ekora-banner-subtitle {
+    font-size: 0.72rem;
+  }
+}
+
+/* Small mobile devices (320px - 380px) */
+@media (max-width: 380px) {
+  .main-content {
+    padding: 0.75rem 0.5rem;
+  }
+
+  .panel-card {
+    padding: 1rem 0.75rem;
+  }
+
+  .nav-tab-btn {
+    padding: 0.45rem 0.55rem;
+    font-size: 0.75rem;
+  }
+
+  .mobile-product-inputs-grid {
+    grid-template-columns: 1fr 1fr;
+    gap: 0.5rem;
+  }
+
+  .mobile-product-inputs-grid .form-group:last-child {
+    grid-column: span 2;
+  }
+
+  .summary-total-amount {
+    font-size: 1.4rem;
+  }
+
+  .ekora-banner-inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

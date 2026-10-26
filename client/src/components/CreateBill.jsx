@@ -158,19 +158,43 @@ export default function CreateBill() {
     }
   };
 
-  // Product item handlers
+  // Product item handlers - Solves Quantity & Price editing UX smoothly
   const handleProductChange = (index, field, value) => {
     const updated = [...products];
     if (field === 'quantity') {
-      updated[index][field] = Math.max(1, parseInt(value, 10) || 1);
+      // Allow clearing the field or typing any number freely without jumping to 1
+      if (value === '') {
+        updated[index].quantity = '';
+      } else {
+        const cleaned = String(value).replace(/[^0-9]/g, '');
+        updated[index].quantity = cleaned === '' ? '' : parseInt(cleaned, 10);
+      }
     } else if (field === 'unitPrice') {
-      updated[index][field] = Math.max(0, parseFloat(value) || 0);
+      if (value === '') {
+        updated[index].unitPrice = '';
+      } else {
+        updated[index].unitPrice = value;
+      }
     } else if (field === 'gstRate') {
       updated[index][field] = Number(value) || 0;
     } else {
       updated[index][field] = value;
     }
     setProducts(updated);
+  };
+
+  // On blur, enforce valid minimum positive numbers if empty
+  const handleProductBlur = (index, field) => {
+    const updated = [...products];
+    if (field === 'quantity') {
+      const parsed = parseInt(updated[index].quantity, 10);
+      updated[index].quantity = !isNaN(parsed) && parsed >= 1 ? parsed : 1;
+      setProducts(updated);
+    } else if (field === 'unitPrice') {
+      const parsed = parseFloat(updated[index].unitPrice);
+      updated[index].unitPrice = !isNaN(parsed) && parsed >= 0 ? parsed : 0;
+      setProducts(updated);
+    }
   };
 
   const addProduct = () => {
@@ -226,10 +250,19 @@ export default function CreateBill() {
       return;
     }
 
+    // Normalize any temporary empty quantities or prices before generation
+    const normalizedProducts = products.map((p) => ({
+      ...p,
+      quantity: Math.max(1, parseInt(p.quantity, 10) || 1),
+      unitPrice: Math.max(0, parseFloat(p.unitPrice) || 0),
+    }));
+
     setIsGenerating(true);
     setNotification(null);
 
     try {
+      const finalCalculations = calculateInvoiceTotals(normalizedProducts, parsedShipping, isInterState);
+
       const payload = {
         invoiceNumber,
         invoiceDate,
@@ -250,16 +283,16 @@ export default function CreateBill() {
               pin: billTo.pin,
             }
           : shipTo,
-        products: invoiceCalculations.items,
+        products: finalCalculations.items,
         shippingCharge: parsedShipping,
-        subtotal,
-        tax: totalGST,
-        totalGST,
-        totalCGST,
-        totalSGST,
-        totalIGST,
+        subtotal: finalCalculations.subtotal,
+        tax: finalCalculations.totalGST,
+        totalGST: finalCalculations.totalGST,
+        totalCGST: finalCalculations.totalCGST,
+        totalSGST: finalCalculations.totalSGST,
+        totalIGST: finalCalculations.totalIGST,
         isInterState,
-        grandTotal,
+        grandTotal: finalCalculations.grandTotal,
       };
 
       const response = await fetch('/api/bills/generate-pdf', {
@@ -361,18 +394,18 @@ export default function CreateBill() {
       )}
 
       {/* Official Template Banner */}
-      <div className="panel-card" style={{ background: '#fafbfc', borderLeft: '4px solid #000' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem', flexWrap: 'wrap' }}>
+      <div className="panel-card ekora-banner">
+        <div className="ekora-banner-inner">
           <img
             src="/ekora-logo.png"
             alt="Ekora Bazaar"
-            style={{ width: '56px', height: '56px', objectFit: 'contain' }}
+            className="ekora-banner-logo"
           />
           <div>
-            <h2 style={{ fontFamily: 'var(--font-heading)', fontSize: '1.25rem', fontWeight: 700, margin: 0 }}>
+            <h2 className="ekora-banner-title">
               EKORA BAZAAR — ARTISAN GOODS
             </h2>
-            <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            <p className="ekora-banner-subtitle">
               Official Tax Invoice Generator • GSTIN: 10AANFE1465G1ZR • Muzaffarpur, Bihar
             </p>
           </div>
@@ -392,7 +425,7 @@ export default function CreateBill() {
             </div>
           </div>
 
-          <div className="grid-2" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+          <div className="grid-responsive-metadata">
             <div className="form-group">
               <label className="form-label" htmlFor="invoice-num">Invoice Number *</label>
               <input
@@ -470,7 +503,7 @@ export default function CreateBill() {
               />
             </div>
 
-            {/* NEW: Customer Phone Number Field */}
+            {/* Customer Phone Number Field */}
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
               <label className="form-label" htmlFor="billto-phone">
                 Customer Phone Number <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--text-muted)' }}>(Optional)</span>
@@ -479,6 +512,7 @@ export default function CreateBill() {
                 id="billto-phone"
                 className={`form-input ${!phoneValidation.isValid ? 'form-input-error' : ''}`}
                 type="tel"
+                inputMode="numeric"
                 placeholder="e.g. 9876543210 (10-digit mobile)"
                 value={billTo.phone}
                 onChange={(e) => handleBillToChange('phone', e.target.value)}
@@ -516,7 +550,7 @@ export default function CreateBill() {
               />
             </div>
 
-            <div className="grid-3" style={{ marginBottom: '0.85rem' }}>
+            <div className="grid-3 csp-grid" style={{ marginBottom: '0.85rem' }}>
               <div className="form-group">
                 <label className="form-label" htmlFor="billto-city">City *</label>
                 <input
@@ -549,6 +583,7 @@ export default function CreateBill() {
                   id="billto-pin"
                   className="form-input"
                   type="text"
+                  inputMode="numeric"
                   required
                   placeholder="e.g. 842001"
                   value={billTo.pin}
@@ -610,6 +645,7 @@ export default function CreateBill() {
                 id="shipto-phone"
                 className="form-input"
                 type="tel"
+                inputMode="numeric"
                 disabled={sameAsBillTo}
                 placeholder="e.g. 9876543210 (10-digit mobile)"
                 value={shipTo.phone}
@@ -645,7 +681,7 @@ export default function CreateBill() {
               />
             </div>
 
-            <div className="grid-3">
+            <div className="grid-3 csp-grid">
               <div className="form-group">
                 <label className="form-label" htmlFor="shipto-city">City *</label>
                 <input
@@ -680,6 +716,7 @@ export default function CreateBill() {
                   id="shipto-pin"
                   className="form-input"
                   type="text"
+                  inputMode="numeric"
                   required
                   disabled={sameAsBillTo}
                   placeholder="e.g. 842001"
@@ -691,7 +728,7 @@ export default function CreateBill() {
           </div>
         </div>
 
-        {/* Section 3: Products Table (Item-wise GST Dropdown, HSN Column Removed) */}
+        {/* Section 4: Products Table (Dual: Desktop Table + Mobile Product Cards) */}
         <div className="panel-card">
           <div className="panel-header">
             <div>
@@ -707,13 +744,14 @@ export default function CreateBill() {
             </button>
           </div>
 
-          <div className="items-table-wrapper">
+          {/* 1. Desktop & Tablet Table View */}
+          <div className="items-table-wrapper desktop-table-view">
             <table className="items-table">
               <thead>
                 <tr>
                   <th style={{ width: '45px', textAlign: 'center' }}>S. No.</th>
                   <th>Product Name</th>
-                  <th style={{ width: '80px', textAlign: 'center' }}>Qty</th>
+                  <th style={{ width: '85px', textAlign: 'center' }}>Qty</th>
                   <th style={{ width: '130px', textAlign: 'right' }}>Unit Price (₹)</th>
                   <th style={{ width: '110px', textAlign: 'center' }}>GST Rate (%)</th>
                   <th style={{ width: '115px', textAlign: 'right' }}>GST Amt (₹)</th>
@@ -742,13 +780,17 @@ export default function CreateBill() {
                       </td>
                       <td>
                         <input
-                          type="number"
-                          min="1"
-                          step="1"
-                          className="form-input"
+                          type="text"
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          className="form-input input-quantity"
                           style={{ textAlign: 'center' }}
                           value={prod.quantity}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => handleProductChange(index, 'quantity', e.target.value)}
+                          onBlur={() => handleProductBlur(index, 'quantity')}
+                          placeholder="1"
+                          aria-label={`Quantity for row ${index + 1}`}
                         />
                       </td>
                       <td>
@@ -760,7 +802,10 @@ export default function CreateBill() {
                           style={{ textAlign: 'right' }}
                           placeholder="0.00"
                           value={prod.unitPrice}
+                          onFocus={(e) => e.target.select()}
                           onChange={(e) => handleProductChange(index, 'unitPrice', e.target.value)}
+                          onBlur={() => handleProductBlur(index, 'unitPrice')}
+                          aria-label={`Unit price for row ${index + 1}`}
                         />
                       </td>
                       {/* Item-wise GST Dropdown */}
@@ -802,6 +847,110 @@ export default function CreateBill() {
               </tbody>
             </table>
           </div>
+
+          {/* 2. Mobile Responsive Product Cards View (<640px) */}
+          <div className="mobile-product-cards-container mobile-card-view">
+            {products.map((prod, index) => {
+              const lineCalc = calculateItemGST(prod, isInterState);
+              return (
+                <div className="mobile-product-card" key={prod.id}>
+                  <div className="mobile-product-card-header">
+                    <span className="mobile-product-index-badge">#{index + 1}</span>
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-icon-only"
+                      title="Remove product"
+                      onClick={() => removeProduct(index)}
+                      aria-label={`Remove product ${index + 1}`}
+                    >
+                      ✕
+                    </button>
+                  </div>
+
+                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
+                    <label className="form-label">Product Name *</label>
+                    <input
+                      type="text"
+                      className="form-input"
+                      placeholder="e.g. Product Name"
+                      required
+                      value={prod.productName}
+                      onChange={(e) => handleProductChange(index, 'productName', e.target.value)}
+                    />
+                  </div>
+
+                  <div className="mobile-product-inputs-grid">
+                    <div className="form-group">
+                      <label className="form-label">Qty</label>
+                      <input
+                        type="text"
+                        inputMode="numeric"
+                        pattern="[0-9]*"
+                        className="form-input input-quantity"
+                        style={{ textAlign: 'center', fontWeight: 600 }}
+                        value={prod.quantity}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => handleProductChange(index, 'quantity', e.target.value)}
+                        onBlur={() => handleProductBlur(index, 'quantity')}
+                        placeholder="1"
+                        aria-label={`Quantity for product ${index + 1}`}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">Price (₹)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        className="form-input"
+                        style={{ textAlign: 'right' }}
+                        placeholder="0.00"
+                        value={prod.unitPrice}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => handleProductChange(index, 'unitPrice', e.target.value)}
+                        onBlur={() => handleProductBlur(index, 'unitPrice')}
+                        aria-label={`Price for product ${index + 1}`}
+                      />
+                    </div>
+
+                    <div className="form-group">
+                      <label className="form-label">GST Rate</label>
+                      <select
+                        className="form-select"
+                        style={{ textAlign: 'center', fontWeight: 600 }}
+                        value={prod.gstRate !== undefined ? prod.gstRate : DEFAULT_GST_RATE}
+                        onChange={(e) => handleProductChange(index, 'gstRate', e.target.value)}
+                        aria-label={`GST rate for product ${index + 1}`}
+                      >
+                        {GST_RATES.map((rate) => (
+                          <option key={rate} value={rate}>
+                            {rate}%
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+
+                  {/* Mobile Live Calculations Pill */}
+                  <div className="mobile-product-card-totals">
+                    <div className="mobile-calc-item">
+                      <span className="mobile-calc-label">Taxable:</span>
+                      <span className="mobile-calc-value">₹ {formatCurrency(lineCalc.taxableAmount)}</span>
+                    </div>
+                    <div className="mobile-calc-item">
+                      <span className="mobile-calc-label">GST ({lineCalc.gstRate}%):</span>
+                      <span className="mobile-calc-value">₹ {formatCurrency(lineCalc.gstAmount)}</span>
+                    </div>
+                    <div className="mobile-calc-item mobile-calc-highlight">
+                      <span className="mobile-calc-label">Total:</span>
+                      <span className="mobile-calc-value bold">₹ {formatCurrency(lineCalc.lineTotal)}</span>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
 
         {/* Section 5: Shipping Charge (0% GST) */}
@@ -816,7 +965,7 @@ export default function CreateBill() {
             </div>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '1.25rem', alignItems: 'center' }}>
+          <div className="shipping-grid">
             <div className="form-group" style={{ marginBottom: 0 }}>
               <label className="form-label" htmlFor="shipping-charge">
                 Shipping / Delivery Charge (₹)
@@ -844,7 +993,13 @@ export default function CreateBill() {
                   style={{ paddingLeft: '28px', fontSize: '1.05rem', fontWeight: 600 }}
                   placeholder="0.00"
                   value={shippingCharge}
+                  onFocus={(e) => e.target.select()}
                   onChange={(e) => setShippingCharge(e.target.value)}
+                  onBlur={() => {
+                    if (shippingCharge === '' || isNaN(parseFloat(shippingCharge))) {
+                      setShippingCharge(0);
+                    }
+                  }}
                 />
               </div>
               <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem', display: 'block' }}>
@@ -852,17 +1007,7 @@ export default function CreateBill() {
               </span>
             </div>
 
-            <div
-              style={{
-                background: 'linear-gradient(135deg, #f0fdf4 0%, #ecfdf5 100%)',
-                border: '1px solid var(--success-border)',
-                borderRadius: 'var(--radius-md)',
-                padding: '0.9rem 1.15rem',
-                display: 'flex',
-                gap: '0.75rem',
-                alignItems: 'flex-start',
-              }}
-            >
+            <div className="shipping-info-banner">
               <div style={{ fontSize: '1.35rem', lineHeight: 1, marginTop: '2px' }}>🚚</div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: '0.875rem', color: '#065f46', marginBottom: '0.15rem' }}>
@@ -885,9 +1030,9 @@ export default function CreateBill() {
             </div>
           </div>
 
-          <div className="grid-2" style={{ alignItems: 'flex-start' }}>
+          <div className="summary-grid">
             {/* Amount in Words */}
-            <div style={{ background: '#f8fafc', padding: '1.25rem', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-main)' }}>
+            <div className="amount-words-card">
               <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: '0.4rem', color: 'var(--text-main)' }}>
                 Amount in Words:
               </div>
@@ -956,11 +1101,10 @@ export default function CreateBill() {
         </div>
 
         {/* Action Bar */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem', marginTop: '1.5rem', marginBottom: '3rem' }}>
+        <div className="action-bar">
           <button
             type="submit"
-            className="btn btn-primary"
-            style={{ padding: '0.85rem 2.25rem', fontSize: '1.05rem' }}
+            className="btn btn-primary btn-generate-pdf"
             disabled={isGenerating}
           >
             {isGenerating ? 'Generating Official PDF...' : '📄 Generate & Download Final Bill (PDF)'}

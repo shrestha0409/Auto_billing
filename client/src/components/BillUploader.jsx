@@ -216,7 +216,7 @@ export default function BillUploader({ category, title, badgeText, description }
                 </div>
               </div>
 
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
+              <div className="selected-file-actions" style={{ display: 'flex', gap: '0.5rem' }}>
                 <button
                   type="button"
                   className="btn btn-secondary"
@@ -272,7 +272,7 @@ export default function BillUploader({ category, title, badgeText, description }
                 <div className="vault-item-left">
                   <span style={{ fontSize: '1.4rem' }}>📑</span>
                   <div>
-                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)' }}>
+                    <div style={{ fontWeight: 600, fontSize: '0.9rem', color: 'var(--text-main)', wordBreak: 'break-word' }}>
                       {file.fileName.replace(/^\d+-\d+-/, '')}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
@@ -281,7 +281,7 @@ export default function BillUploader({ category, title, badgeText, description }
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                <div className="vault-item-actions">
                   <span className="vault-badge">
                     {formatFileSize(file.sizeBytes)}
                   </span>
