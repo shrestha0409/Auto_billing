@@ -425,7 +425,7 @@ export default function CreateBill() {
             </div>
           </div>
 
-          <div className="grid-responsive-metadata">
+          <div className="grid-responsive-metadata metadata-grid">
             <div className="form-group">
               <label className="form-label" htmlFor="invoice-num">Invoice Number *</label>
               <input
@@ -854,40 +854,54 @@ export default function CreateBill() {
               const lineCalc = calculateItemGST(prod, isInterState);
               return (
                 <div className="mobile-product-card" key={prod.id}>
+                  {/* Card Header: Product # badge at top-left, Delete button at top-right */}
                   <div className="mobile-product-card-header">
-                    <span className="mobile-product-index-badge">#{index + 1}</span>
+                    <span className="mobile-product-index-badge">
+                      Product #{index + 1}
+                    </span>
                     <button
                       type="button"
-                      className="btn btn-danger btn-icon-only"
-                      title="Remove product"
+                      className="btn btn-danger mobile-card-delete-btn"
+                      title={`Delete product ${index + 1}`}
                       onClick={() => removeProduct(index)}
-                      aria-label={`Remove product ${index + 1}`}
+                      aria-label={`Delete product ${index + 1}`}
                     >
-                      ✕
+                      ✕ Delete
                     </button>
                   </div>
 
-                  <div className="form-group" style={{ marginBottom: '0.75rem' }}>
-                    <label className="form-label">Product Name *</label>
-                    <input
-                      type="text"
-                      className="form-input"
-                      placeholder="e.g. Product Name"
-                      required
-                      value={prod.productName}
-                      onChange={(e) => handleProductChange(index, 'productName', e.target.value)}
-                    />
-                  </div>
+                  {/* Clean divider below header */}
+                  <div className="mobile-card-divider" />
 
-                  <div className="mobile-product-inputs-grid">
-                    <div className="form-group">
-                      <label className="form-label">Qty</label>
+                  {/* Card Body: Separate, full-width rows for every input field */}
+                  <div className="mobile-product-body">
+                    {/* 1. Full-width Product Name */}
+                    <div className="form-group mobile-field">
+                      <label className="form-label" htmlFor={`mobile-prod-name-${index}`}>
+                        Product Name *
+                      </label>
                       <input
+                        id={`mobile-prod-name-${index}`}
+                        type="text"
+                        className="form-input"
+                        placeholder="e.g. Product Name"
+                        required
+                        value={prod.productName}
+                        onChange={(e) => handleProductChange(index, 'productName', e.target.value)}
+                      />
+                    </div>
+
+                    {/* 2. Full-width Quantity Input */}
+                    <div className="form-group mobile-field">
+                      <label className="form-label" htmlFor={`mobile-prod-qty-${index}`}>
+                        Quantity *
+                      </label>
+                      <input
+                        id={`mobile-prod-qty-${index}`}
                         type="text"
                         inputMode="numeric"
                         pattern="[0-9]*"
                         className="form-input input-quantity"
-                        style={{ textAlign: 'center', fontWeight: 600 }}
                         value={prod.quantity}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) => handleProductChange(index, 'quantity', e.target.value)}
@@ -897,14 +911,17 @@ export default function CreateBill() {
                       />
                     </div>
 
-                    <div className="form-group">
-                      <label className="form-label">Price (₹)</label>
+                    {/* 3. Full-width Price Input */}
+                    <div className="form-group mobile-field">
+                      <label className="form-label" htmlFor={`mobile-prod-price-${index}`}>
+                        Price (₹) *
+                      </label>
                       <input
+                        id={`mobile-prod-price-${index}`}
                         type="number"
                         min="0"
                         step="0.01"
                         className="form-input"
-                        style={{ textAlign: 'right' }}
                         placeholder="0.00"
                         value={prod.unitPrice}
                         onFocus={(e) => e.target.select()}
@@ -914,38 +931,52 @@ export default function CreateBill() {
                       />
                     </div>
 
-                    <div className="form-group">
-                      <label className="form-label">GST Rate</label>
+                    {/* 4. Full-width GST Rate Dropdown */}
+                    <div className="form-group mobile-field">
+                      <label className="form-label" htmlFor={`mobile-prod-gst-${index}`}>
+                        GST Rate *
+                      </label>
                       <select
+                        id={`mobile-prod-gst-${index}`}
                         className="form-select"
-                        style={{ textAlign: 'center', fontWeight: 600 }}
                         value={prod.gstRate !== undefined ? prod.gstRate : DEFAULT_GST_RATE}
                         onChange={(e) => handleProductChange(index, 'gstRate', e.target.value)}
                         aria-label={`GST rate for product ${index + 1}`}
                       >
                         {GST_RATES.map((rate) => (
                           <option key={rate} value={rate}>
-                            {rate}%
+                            {rate}% GST
                           </option>
                         ))}
                       </select>
                     </div>
-                  </div>
 
-                  {/* Mobile Live Calculations Pill */}
-                  <div className="mobile-product-card-totals">
-                    <div className="mobile-calc-item">
-                      <span className="mobile-calc-label">Taxable:</span>
-                      <span className="mobile-calc-value">₹ {formatCurrency(lineCalc.taxableAmount)}</span>
+                    {/* 5. Well-organized GST calculation summary */}
+                    <div className="mobile-product-card-totals">
+                      <div className="mobile-calc-row">
+                        <span className="mobile-calc-label">Taxable Amount:</span>
+                        <span className="mobile-calc-value">₹ {formatCurrency(lineCalc.taxableAmount)}</span>
+                      </div>
+                      <div className="mobile-calc-row">
+                        <span className="mobile-calc-label">GST ({lineCalc.gstRate}%):</span>
+                        <span className="mobile-calc-value">₹ {formatCurrency(lineCalc.gstAmount)}</span>
+                      </div>
+                      <div className="mobile-calc-divider" />
+                      <div className="mobile-calc-row mobile-calc-grand-total">
+                        <span className="mobile-calc-label bold">Grand Total:</span>
+                        <span className="mobile-calc-value bold">₹ {formatCurrency(lineCalc.lineTotal)}</span>
+                      </div>
                     </div>
-                    <div className="mobile-calc-item">
-                      <span className="mobile-calc-label">GST ({lineCalc.gstRate}%):</span>
-                      <span className="mobile-calc-value">₹ {formatCurrency(lineCalc.gstAmount)}</span>
-                    </div>
-                    <div className="mobile-calc-item mobile-calc-highlight">
-                      <span className="mobile-calc-label">Total:</span>
-                      <span className="mobile-calc-value bold">₹ {formatCurrency(lineCalc.lineTotal)}</span>
-                    </div>
+
+                    {/* 6. Full-width Delete Product Button */}
+                    <button
+                      type="button"
+                      className="btn btn-danger btn-delete-product-full"
+                      onClick={() => removeProduct(index)}
+                      aria-label={`Delete product ${index + 1}`}
+                    >
+                      🗑️ Delete Product
+                    </button>
                   </div>
                 </div>
               );
