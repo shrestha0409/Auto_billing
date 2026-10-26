@@ -1,0 +1,19 @@
+{
+  "name": "auto-billing-software",
+  "version": "1.0.0",
+  "description": "Production Auto Billing Software with Item-wise GST, PDF Generation, and Document Vault",
+  "private": true,
+  "scripts": {
+    "build": "cd client && npm install && npm run build",
+    "client:dev": "npm run dev --prefix client",
+    "server:dev": "npm run dev --prefix server",
+    "start": "node server/index.js",
+    "test": "node server/test_pdf.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "express": "^5.2.1",
+    "multer": "^2.4.0",
+    "pdfkit": "^0.20.2"
+  }
+}

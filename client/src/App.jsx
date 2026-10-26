@@ -31,7 +31,7 @@ function App() {
             >
               <span>📝</span>
               <span>1. Create Bill</span>
-              <span className="tab-badge tax">18% GST</span>
+              <span className="tab-badge tax">Flexible GST</span>
             </button>
 
             <button
@@ -81,7 +81,7 @@ function App() {
       {/* App Footer */}
       <footer className="app-footer">
         <p>
-          AutoBilling Portal • Option 1: Create Bill (18% Auto-Tax & PDF) • Option 2: Manufacturer Bill (Storage Only) • Option 3: Miscellaneous Bill (Storage Only)
+          AutoBilling Portal • Option 1: Create Bill (Item-wise Flexible GST & PDF) • Option 2: Manufacturer Bill (Storage Only) • Option 3: Miscellaneous Bill (Storage Only)
         </p>
       </footer>
     </div>

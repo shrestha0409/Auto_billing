@@ -4,6 +4,13 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const PDFDocument = require('pdfkit');
+const {
+  formatCurrency,
+  validateIndianMobile,
+  checkIsInterState,
+  calculateInvoiceTotals,
+  DEFAULT_SUPPLIER_STATE,
+} = require('./utils/gstCalculator');
 
 const app = express();
 const PORT = process.env.PORT || 5000;
@@ -13,14 +20,20 @@ app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Ensure upload directories exist
-const UPLOADS_ROOT = path.join(__dirname, 'uploads');
+// Detect serverless environment (e.g. Vercel / AWS Lambda) where root filesystem is read-only
+const isServerless = Boolean(process.env.VERCEL || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const UPLOADS_ROOT = isServerless ? path.join('/tmp', 'uploads') : path.join(__dirname, 'uploads');
 const MANUFACTURER_DIR = path.join(UPLOADS_ROOT, 'manufacturer');
 const MISC_DIR = path.join(UPLOADS_ROOT, 'miscellaneous');
 
+// Safely ensure upload directories exist
 [UPLOADS_ROOT, MANUFACTURER_DIR, MISC_DIR].forEach((dir) => {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  try {
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+  } catch (err) {
+    console.warn(`Could not create directory ${dir}:`, err.message);
   }
 });
 
@@ -58,7 +71,7 @@ app.get('/api/health', (req, res) => {
 // Helper: Number to Indian Rupees Words
 // -------------------------------------------------------------
 function numberToIndianWords(num) {
-  if (!num || num === 0) return 'Rupees Zero Only';
+  if (!num || num <= 0) return 'Rupees Zero Only';
 
   const units = ['', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight', 'Nine', 'Ten',
     'Eleven', 'Twelve', 'Thirteen', 'Fourteen', 'Fifteen', 'Sixteen', 'Seventeen', 'Eighteen', 'Nineteen'];
@@ -130,14 +143,6 @@ function formatInvoiceDate(dateStr) {
   return `${day} ${months[d.getMonth()]} ${d.getFullYear()}`;
 }
 
-function formatCurrency(num) {
-  const n = Number(num) || 0;
-  return n.toLocaleString('en-IN', {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  });
-}
-
 // -------------------------------------------------------------
 // Helper: Generate Unique Timestamped Invoice Filename
 // -------------------------------------------------------------
@@ -159,7 +164,7 @@ function generateInvoiceFilename(invoiceNumber) {
 }
 
 // -------------------------------------------------------------
-// 1. CREATE BILL: Generate Official Ekora Bazaar PDF with 18% Tax
+// 1. CREATE BILL: Generate Official Ekora Bazaar PDF with Item-wise GST
 // -------------------------------------------------------------
 app.post('/api/bills/generate-pdf', (req, res) => {
   try {
@@ -179,34 +184,35 @@ app.post('/api/bills/generate-pdf', (req, res) => {
 
     const parsedShipping = Math.max(0, Number(shippingCharge) || 0);
     const finalOrderNo = orderNumber || orderNo || 'ORD12345';
+
+    // Standardize input products list
     const rawProducts = Array.isArray(products) && products.length > 0
       ? products
       : Array.isArray(items) && items.length > 0
       ? items
       : [
-          { productName: 'Product 1', hsn: 'XXXX', quantity: 1, unitPrice: 500 },
-          { productName: 'Product 2', hsn: 'XXXX', quantity: 2, unitPrice: 300 },
-          { productName: 'Product 3', hsn: 'XXXX', quantity: 1, unitPrice: 200 },
+          { productName: 'Product 1', quantity: 1, unitPrice: 500, gstRate: 18 },
+          { productName: 'Product 2', quantity: 2, unitPrice: 300, gstRate: 18 },
+          { productName: 'Product 3', quantity: 1, unitPrice: 200, gstRate: 18 },
         ];
 
-    let subtotal = 0;
-    const computedProducts = rawProducts.map((p, idx) => {
-      const qty = Number(p.quantity) || 1;
-      const price = Number(p.unitPrice !== undefined ? p.unitPrice : p.rate) || 0;
-      const amount = qty * price;
-      subtotal += amount;
-      return {
-        sno: idx + 1,
-        name: p.productName || p.description || `Product ${idx + 1}`,
-        hsn: p.hsn || 'XXXX',
-        qty,
-        unitPrice: price,
-        amount,
-      };
-    });
+    // Determine Inter-state vs Intra-state based on customer billing state
+    const customerState = billTo.state || customer.state || '';
+    const isInterState = checkIsInterState(DEFAULT_SUPPLIER_STATE, customerState);
 
-    const tax = subtotal * 0.18; // Exactly 18% requirement
-    const grandTotal = subtotal + tax + parsedShipping;
+    // Calculate accurate item-level and invoice-level totals
+    const calculation = calculateInvoiceTotals(rawProducts, parsedShipping, isInterState);
+    const { subtotal, totalGST, totalCGST, totalSGST, totalIGST, grandTotal } = calculation;
+
+    const computedProducts = calculation.items.map((p, idx) => ({
+      sno: idx + 1,
+      name: p.productName || p.name || p.description || `Product ${idx + 1}`,
+      qty: p.quantity,
+      unitPrice: p.unitPrice,
+      gstRate: p.gstRate,
+      gstAmount: p.gstAmount,
+      lineTotal: p.lineTotal,
+    }));
 
     const uniqueFilename = generateInvoiceFilename(invoiceNumber);
 
@@ -219,7 +225,7 @@ app.post('/api/bills/generate-pdf', (req, res) => {
       },
     });
 
-    // Register system fonts for Indian Rupee symbol & serif headers
+    // Register system fonts for Indian Rupee symbol & serif headers if available
     const fontsDir = 'C:/Windows/Fonts';
     const hasArial = fs.existsSync(path.join(fontsDir, 'arial.ttf'));
     const hasArialBd = fs.existsSync(path.join(fontsDir, 'arialbd.ttf'));
@@ -366,11 +372,11 @@ app.post('/api/bills/generate-pdf', (req, res) => {
     doc.text(paymentModeStr, metaValuesX, metaY + metaLineHeight * 2);
 
     // -------------------------------------------------------------
-    // 3. BILL TO & SHIP TO BOXES
+    // 3. BILL TO & SHIP TO BOXES (With Optional Customer Phone Number)
     // -------------------------------------------------------------
     const boxY = 224;
     const boxWidth = 248;
-    const boxHeight = 100;
+    const boxHeight = 104;
     const shipBoxX = 307;
 
     // Helper for city, state, pin
@@ -387,6 +393,14 @@ app.post('/api/bills/generate-pdf', (req, res) => {
       return parts.join('') || 'City, State - PIN';
     };
 
+    // Extract customer phone numbers (sanitized)
+    const billPhoneRes = validateIndianMobile(billTo.phone || customer.phone || '');
+    const billPhone = billPhoneRes.isValid ? billPhoneRes.sanitized : '';
+
+    const activeShipTo = Object.keys(shipTo).length > 0 ? shipTo : billTo;
+    const shipPhoneRes = validateIndianMobile(activeShipTo.phone || billTo.phone || customer.phone || '');
+    const shipPhone = shipPhoneRes.isValid ? shipPhoneRes.sanitized : '';
+
     // BILL TO Box
     doc.rect(leftMargin, boxY, boxWidth, boxHeight).lineWidth(0.5).strokeColor('#000000').stroke();
     doc.rect(leftMargin, boxY, boxWidth, 20).fill('#e8e8e8');
@@ -395,16 +409,32 @@ app.post('/api/bills/generate-pdf', (req, res) => {
 
     const billCustName = billTo.customerName || customer.name || 'Customer Name';
     const billAddr1 = billTo.addressLine1 || customer.address || 'Address Line 1';
-    const billAddr2 = billTo.addressLine2 || 'Address Line 2';
+    const billAddr2 = billTo.addressLine2 || '';
     const billCSP = formatCSP(billTo.city ? billTo : customer);
     const billGstin = billTo.gstin ? `GSTIN (if any): ${billTo.gstin}` : 'GSTIN (if any): -';
 
-    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000').text(billCustName, leftMargin + 8, boxY + 26);
+    let currentBillY = boxY + 25;
+    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000').text(billCustName, leftMargin + 8, currentBillY);
+    currentBillY += 12;
+
+    // Conditionally display Customer Phone Number (hide if empty)
+    if (billPhone) {
+      doc.font(fontSans).fontSize(8).fillColor('#333333').text(`Phone: ${billPhone}`, leftMargin + 8, currentBillY);
+      currentBillY += 11;
+    }
+
     doc.font(fontSans).fontSize(8).fillColor('#222222');
-    doc.text(billAddr1, leftMargin + 8, boxY + 40, { width: boxWidth - 16, lineGap: 1.5 });
-    doc.text(billAddr2, leftMargin + 8, boxY + 53, { width: boxWidth - 16, lineGap: 1.5 });
-    doc.text(billCSP, leftMargin + 8, boxY + 66, { width: boxWidth - 16, lineGap: 1.5 });
-    doc.text(billGstin, leftMargin + 8, boxY + 79, { width: boxWidth - 16, lineGap: 1.5 });
+    doc.text(billAddr1, leftMargin + 8, currentBillY, { width: boxWidth - 16, lineGap: 1.5 });
+    currentBillY += 11;
+
+    if (billAddr2) {
+      doc.text(billAddr2, leftMargin + 8, currentBillY, { width: boxWidth - 16, lineGap: 1.5 });
+      currentBillY += 11;
+    }
+
+    doc.text(billCSP, leftMargin + 8, currentBillY, { width: boxWidth - 16, lineGap: 1.5 });
+    currentBillY += 11;
+    doc.text(billGstin, leftMargin + 8, currentBillY, { width: boxWidth - 16, lineGap: 1.5 });
 
     // SHIP TO Box
     doc.rect(shipBoxX, boxY, boxWidth, boxHeight).lineWidth(0.5).strokeColor('#000000').stroke();
@@ -412,38 +442,54 @@ app.post('/api/bills/generate-pdf', (req, res) => {
     doc.strokeColor('#000000').lineWidth(0.5).rect(shipBoxX, boxY, boxWidth, 20).stroke();
     doc.fillColor('#000000').font(fontSansBold).fontSize(9).text('Ship To', shipBoxX + 8, boxY + 6);
 
-    const activeShipTo = Object.keys(shipTo).length > 0 ? shipTo : billTo;
     const shipCustName = activeShipTo.customerName || billCustName;
     const shipAddr1 = activeShipTo.addressLine1 || billAddr1;
-    const shipAddr2 = activeShipTo.addressLine2 || billAddr2;
+    const shipAddr2 = activeShipTo.addressLine2 || '';
     const shipCSP = formatCSP(activeShipTo.city ? activeShipTo : (billTo.city ? billTo : customer));
 
-    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000').text(shipCustName, shipBoxX + 8, boxY + 26);
+    let currentShipY = boxY + 25;
+    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000').text(shipCustName, shipBoxX + 8, currentShipY);
+    currentShipY += 12;
+
+    // Conditionally display Customer Phone Number in Ship To (hide if empty)
+    if (shipPhone) {
+      doc.font(fontSans).fontSize(8).fillColor('#333333').text(`Phone: ${shipPhone}`, shipBoxX + 8, currentShipY);
+      currentShipY += 11;
+    }
+
     doc.font(fontSans).fontSize(8).fillColor('#222222');
-    doc.text(shipAddr1, shipBoxX + 8, boxY + 40, { width: boxWidth - 16, lineGap: 1.5 });
-    doc.text(shipAddr2, shipBoxX + 8, boxY + 53, { width: boxWidth - 16, lineGap: 1.5 });
-    doc.text(shipCSP, shipBoxX + 8, boxY + 66, { width: boxWidth - 16, lineGap: 1.5 });
+    doc.text(shipAddr1, shipBoxX + 8, currentShipY, { width: boxWidth - 16, lineGap: 1.5 });
+    currentShipY += 11;
+
+    if (shipAddr2) {
+      doc.text(shipAddr2, shipBoxX + 8, currentShipY, { width: boxWidth - 16, lineGap: 1.5 });
+      currentShipY += 11;
+    }
+
+    doc.text(shipCSP, shipBoxX + 8, currentShipY, { width: boxWidth - 16, lineGap: 1.5 });
 
     // -------------------------------------------------------------
-    // 4. PRODUCT TABLE
+    // 4. PRODUCT TABLE (HSN Column Removed, Custom Item-wise GST Added)
     // -------------------------------------------------------------
-    const tableY = 338;
+    const tableY = 342;
     const colWidths = {
-      sno: 45,
+      sno: 30,
       name: 175,
-      hsn: 65,
-      qty: 50,
-      price: 90,
-      amount: 90,
+      qty: 40,
+      price: 70,
+      gstRate: 55,
+      gstAmount: 70,
+      total: 75,
     };
 
     const colX = {
-      sno: leftMargin,
-      name: leftMargin + colWidths.sno,
-      hsn: leftMargin + colWidths.sno + colWidths.name,
-      qty: leftMargin + colWidths.sno + colWidths.name + colWidths.hsn,
-      price: leftMargin + colWidths.sno + colWidths.name + colWidths.hsn + colWidths.qty,
-      amount: leftMargin + colWidths.sno + colWidths.name + colWidths.hsn + colWidths.qty + colWidths.price,
+      sno: leftMargin, // 40
+      name: leftMargin + colWidths.sno, // 70
+      qty: leftMargin + colWidths.sno + colWidths.name, // 245
+      price: leftMargin + colWidths.sno + colWidths.name + colWidths.qty, // 285
+      gstRate: leftMargin + colWidths.sno + colWidths.name + colWidths.qty + colWidths.price, // 355
+      gstAmount: leftMargin + colWidths.sno + colWidths.name + colWidths.qty + colWidths.price + colWidths.gstRate, // 410
+      total: leftMargin + colWidths.sno + colWidths.name + colWidths.qty + colWidths.price + colWidths.gstRate + colWidths.gstAmount, // 480
     };
 
     // Table Header
@@ -457,17 +503,18 @@ app.post('/api/bills/generate-pdf', (req, res) => {
 
     doc.fillColor('#000000').font(fontSansBold).fontSize(8.5);
     doc.text('S. No.', colX.sno, tableY + 8, { width: colWidths.sno, align: 'center' });
-    doc.text('Product Name', colX.name + 8, tableY + 8, { width: colWidths.name - 16, align: 'left' });
-    doc.text('HSN', colX.hsn, tableY + 8, { width: colWidths.hsn, align: 'center' });
+    doc.text('Product Name', colX.name + 6, tableY + 8, { width: colWidths.name - 12, align: 'left' });
     doc.text('Qty', colX.qty, tableY + 8, { width: colWidths.qty, align: 'center' });
-    doc.text('Unit Price (₹)', colX.price - 8, tableY + 8, { width: colWidths.price, align: 'right' });
-    doc.text('Amount (₹)', colX.amount - 8, tableY + 8, { width: colWidths.amount, align: 'right' });
+    doc.text('Unit Price (₹)', colX.price - 6, tableY + 8, { width: colWidths.price, align: 'right' });
+    doc.text('GST %', colX.gstRate, tableY + 8, { width: colWidths.gstRate, align: 'center' });
+    doc.text('GST Amt (₹)', colX.gstAmount - 6, tableY + 8, { width: colWidths.gstAmount, align: 'right' });
+    doc.text('Total (₹)', colX.total - 6, tableY + 8, { width: colWidths.total, align: 'right' });
 
     // Table Rows
     let currentY = tableY + headerHeight;
     const rowHeight = 24;
 
-    computedProducts.forEach((prod, idx) => {
+    computedProducts.forEach((prod) => {
       doc.rect(leftMargin, currentY, contentWidth, rowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
       Object.values(colX).slice(1).forEach((x) => {
         doc.moveTo(x, currentY).lineTo(x, currentY + rowHeight).stroke();
@@ -475,14 +522,15 @@ app.post('/api/bills/generate-pdf', (req, res) => {
 
       doc.font(fontSans).fontSize(8.5).fillColor('#000000');
       doc.text(prod.sno.toString(), colX.sno, currentY + 7, { width: colWidths.sno, align: 'center' });
-      doc.text(prod.name, colX.name + 8, currentY + 7, {
-        width: colWidths.name - 16,
+      doc.text(prod.name, colX.name + 6, currentY + 7, {
+        width: colWidths.name - 12,
         ellipsis: true,
       });
-      doc.text(prod.hsn, colX.hsn, currentY + 7, { width: colWidths.hsn, align: 'center' });
       doc.text(prod.qty.toString(), colX.qty, currentY + 7, { width: colWidths.qty, align: 'center' });
-      doc.text(formatCurrency(prod.unitPrice), colX.price - 8, currentY + 7, { width: colWidths.price, align: 'right' });
-      doc.text(formatCurrency(prod.amount), colX.amount - 8, currentY + 7, { width: colWidths.amount, align: 'right' });
+      doc.text(formatCurrency(prod.unitPrice), colX.price - 6, currentY + 7, { width: colWidths.price, align: 'right' });
+      doc.text(`${prod.gstRate}%`, colX.gstRate, currentY + 7, { width: colWidths.gstRate, align: 'center' });
+      doc.text(formatCurrency(prod.gstAmount), colX.gstAmount - 6, currentY + 7, { width: colWidths.gstAmount, align: 'right' });
+      doc.text(formatCurrency(prod.lineTotal), colX.total - 6, currentY + 7, { width: colWidths.total, align: 'right' });
 
       currentY += rowHeight;
     });
@@ -491,64 +539,112 @@ app.post('/api/bills/generate-pdf', (req, res) => {
     // 5. TOTALS & AMOUNT IN WORDS
     // -------------------------------------------------------------
     const totalsY = currentY + 14;
-    const totalsWidth = 230;
+    const totalsWidth = 240;
     const totalsX = rightMargin - totalsWidth;
-    const totalsLabelWidth = 140;
-    const totalsValueWidth = 90;
-    const totalsRowHeight = 22;
+    const totalsLabelWidth = 145;
+    const totalsValueWidth = 95;
+    const totalsRowHeight = 21;
+
+    let totalBoxCursorY = totalsY;
 
     // Subtotal Row
-    doc.rect(totalsX, totalsY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
-    doc.moveTo(totalsX + totalsLabelWidth, totalsY).lineTo(totalsX + totalsLabelWidth, totalsY + totalsRowHeight).stroke();
-    doc.font(fontSansBold).fontSize(9).fillColor('#000000');
-    doc.text('Subtotal', totalsX + 10, totalsY + 6);
-    doc.font(fontSans).text(formatCurrency(subtotal), totalsX + totalsLabelWidth - 10, totalsY + 6, {
+    doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+    doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight).stroke();
+    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000');
+    doc.text('Taxable Subtotal', totalsX + 8, totalBoxCursorY + 5);
+    doc.font(fontSans).text(formatCurrency(subtotal), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 5, {
       width: totalsValueWidth,
       align: 'right',
     });
+    totalBoxCursorY += totalsRowHeight;
 
-    // Total Tax (18%) Row
-    const taxY = totalsY + totalsRowHeight;
-    doc.rect(totalsX, taxY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
-    doc.moveTo(totalsX + totalsLabelWidth, taxY).lineTo(totalsX + totalsLabelWidth, taxY + totalsRowHeight).stroke();
-    doc.font(fontSansBold).fontSize(9).fillColor('#000000');
-    doc.text('Total Tax (18%)', totalsX + 10, taxY + 6);
-    doc.font(fontSans).text(formatCurrency(tax), totalsX + totalsLabelWidth - 10, taxY + 6, {
+    // Tax Rows (Intra-state CGST & SGST vs Inter-state IGST)
+    if (!isInterState) {
+      // CGST Row
+      doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+      doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight).stroke();
+      doc.font(fontSansBold).fontSize(8.5).fillColor('#000000');
+      doc.text('CGST (Central Tax)', totalsX + 8, totalBoxCursorY + 5);
+      doc.font(fontSans).text(formatCurrency(totalCGST), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 5, {
+        width: totalsValueWidth,
+        align: 'right',
+      });
+      totalBoxCursorY += totalsRowHeight;
+
+      // SGST Row
+      doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+      doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight).stroke();
+      doc.font(fontSansBold).fontSize(8.5).fillColor('#000000');
+      doc.text('SGST (State Tax)', totalsX + 8, totalBoxCursorY + 5);
+      doc.font(fontSans).text(formatCurrency(totalSGST), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 5, {
+        width: totalsValueWidth,
+        align: 'right',
+      });
+      totalBoxCursorY += totalsRowHeight;
+    } else {
+      // IGST Row
+      doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+      doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight).stroke();
+      doc.font(fontSansBold).fontSize(8.5).fillColor('#000000');
+      doc.text('IGST (Integrated Tax)', totalsX + 8, totalBoxCursorY + 5);
+      doc.font(fontSans).text(formatCurrency(totalIGST), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 5, {
+        width: totalsValueWidth,
+        align: 'right',
+      });
+      totalBoxCursorY += totalsRowHeight;
+    }
+
+    // Total GST Row
+    doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+    doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight).stroke();
+    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000');
+    doc.text('Total Tax (GST)', totalsX + 8, totalBoxCursorY + 5);
+    doc.font(fontSans).text(formatCurrency(totalGST), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 5, {
       width: totalsValueWidth,
       align: 'right',
     });
+    totalBoxCursorY += totalsRowHeight;
 
     // Shipping (0% GST) Row
-    const shippingY = taxY + totalsRowHeight;
-    doc.rect(totalsX, shippingY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
-    doc.moveTo(totalsX + totalsLabelWidth, shippingY).lineTo(totalsX + totalsLabelWidth, shippingY + totalsRowHeight).stroke();
-    doc.font(fontSansBold).fontSize(9).fillColor('#000000');
-    doc.text('Shipping (0% GST)', totalsX + 10, shippingY + 6);
-    doc.font(fontSans).text(formatCurrency(parsedShipping), totalsX + totalsLabelWidth - 10, shippingY + 6, {
+    doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
+    doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight).stroke();
+    doc.font(fontSansBold).fontSize(8.5).fillColor('#000000');
+    doc.text('Shipping (0% GST)', totalsX + 8, totalBoxCursorY + 5);
+    doc.font(fontSans).text(formatCurrency(parsedShipping), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 5, {
       width: totalsValueWidth,
       align: 'right',
     });
+    totalBoxCursorY += totalsRowHeight;
 
     // Grand Total (₹) Row with light gray fill
-    const grandY = shippingY + totalsRowHeight;
-    doc.rect(totalsX, grandY, totalsWidth, totalsRowHeight).fill('#e8e8e8');
-    doc.rect(totalsX, grandY, totalsWidth, totalsRowHeight).lineWidth(0.5).strokeColor('#000000').stroke();
-    doc.moveTo(totalsX + totalsLabelWidth, grandY).lineTo(totalsX + totalsLabelWidth, grandY + totalsRowHeight).stroke();
+    doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight + 2).fill('#e8e8e8');
+    doc.rect(totalsX, totalBoxCursorY, totalsWidth, totalsRowHeight + 2).lineWidth(0.5).strokeColor('#000000').stroke();
+    doc.moveTo(totalsX + totalsLabelWidth, totalBoxCursorY).lineTo(totalsX + totalsLabelWidth, totalBoxCursorY + totalsRowHeight + 2).stroke();
     doc.font(fontSansBold).fontSize(9.5).fillColor('#000000');
-    doc.text('Grand Total (₹)', totalsX + 10, grandY + 6);
-    doc.text(formatCurrency(grandTotal), totalsX + totalsLabelWidth - 10, grandY + 6, {
+    doc.text('Grand Total (₹)', totalsX + 8, totalBoxCursorY + 6);
+    doc.text(formatCurrency(grandTotal), totalsX + totalsLabelWidth - 8, totalBoxCursorY + 6, {
       width: totalsValueWidth,
       align: 'right',
     });
 
     // Amount in Words on Bottom Left
-    const wordsY = totalsY + 16;
+    const wordsY = totalsY + 14;
     doc.font(fontSansBold).fontSize(9).fillColor('#000000').text('Amount in Words:', leftMargin, wordsY);
     const wordsText = numberToIndianWords(grandTotal);
     doc.font(fontSans).fontSize(8.5).fillColor('#222222').text(wordsText, leftMargin, wordsY + 14, {
       width: totalsX - leftMargin - 16,
       lineGap: 2,
     });
+
+    // Tax Regime Note
+    const regimeY = wordsY + 44;
+    doc.font(fontSans).fontSize(7.5).fillColor('#666666').text(
+      isInterState
+        ? 'Tax Regime: Inter-State Supply (IGST applicable)'
+        : 'Tax Regime: Intra-State Supply (CGST 50% + SGST 50% applicable)',
+      leftMargin,
+      regimeY
+    );
 
     // -------------------------------------------------------------
     // 6. FOOTER
@@ -632,6 +728,10 @@ app.get('/api/bills/uploads/:category', (req, res) => {
       return res.status(400).json({ error: 'Invalid category' });
     }
 
+    if (!fs.existsSync(targetDir)) {
+      return res.json({ category, count: 0, files: [] });
+    }
+
     const files = fs.readdirSync(targetDir).map((fileName) => {
       const stats = fs.statSync(path.join(targetDir, fileName));
       return {
@@ -650,7 +750,12 @@ app.get('/api/bills/uploads/:category', (req, res) => {
 // Serve uploaded bill files statically if needed for previewing/downloading
 app.use('/uploads', express.static(UPLOADS_ROOT));
 
-// Start server
-app.listen(PORT, () => {
-  console.log(`Auto_billing server running on http://localhost:${PORT}`);
-});
+// Export app for Vercel Serverless Function & testing
+module.exports = app;
+
+// Start standalone server locally
+if (process.env.NODE_ENV !== 'production' || !process.env.VERCEL) {
+  app.listen(PORT, () => {
+    console.log(`Auto_billing server running on http://localhost:${PORT}`);
+  });
+}

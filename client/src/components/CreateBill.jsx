@@ -1,4 +1,14 @@
 import React, { useState, useMemo } from 'react';
+import {
+  GST_RATES,
+  DEFAULT_GST_RATE,
+  DEFAULT_SUPPLIER_STATE,
+  formatCurrency,
+  validateIndianMobile,
+  checkIsInterState,
+  calculateItemGST,
+  calculateInvoiceTotals,
+} from '../utils/gstCalculator';
 
 // Number to Indian Rupees Words Helper
 function numberToIndianWords(num) {
@@ -72,9 +82,10 @@ export default function CreateBill() {
   const [orderNumber, setOrderNumber] = useState('ORD12345');
   const [paymentMode, setPaymentMode] = useState('Online');
 
-  // 2. Bill To
+  // 2. Bill To (with Customer Phone Number)
   const [billTo, setBillTo] = useState({
     customerName: 'Customer Name',
+    phone: '',
     addressLine1: 'Address Line 1',
     addressLine2: 'Address Line 2',
     city: 'Muzaffarpur',
@@ -83,10 +94,11 @@ export default function CreateBill() {
     gstin: '',
   });
 
-  // 3. Ship To
+  // 3. Ship To (with Customer Phone Number)
   const [sameAsBillTo, setSameAsBillTo] = useState(true);
   const [shipTo, setShipTo] = useState({
     customerName: 'Customer Name',
+    phone: '',
     addressLine1: 'Address Line 1',
     addressLine2: 'Address Line 2',
     city: 'Muzaffarpur',
@@ -94,11 +106,11 @@ export default function CreateBill() {
     pin: '842001',
   });
 
-  // 4. Products Table
+  // 4. Products Table (Item-wise GST rates, HSN column removed)
   const [products, setProducts] = useState([
-    { id: 1, productName: 'Product 1', hsn: 'XXXX', quantity: 1, unitPrice: 500 },
-    { id: 2, productName: 'Product 2', hsn: 'XXXX', quantity: 2, unitPrice: 300 },
-    { id: 3, productName: 'Product 3', hsn: 'XXXX', quantity: 1, unitPrice: 200 },
+    { id: 1, productName: 'Product 1', quantity: 1, unitPrice: 500, gstRate: 18 },
+    { id: 2, productName: 'Product 2', quantity: 2, unitPrice: 300, gstRate: 18 },
+    { id: 3, productName: 'Product 3', quantity: 1, unitPrice: 200, gstRate: 18 },
   ]);
 
   // 5. Shipping Charge (with 0% GST)
@@ -106,6 +118,16 @@ export default function CreateBill() {
 
   const [isGenerating, setIsGenerating] = useState(false);
   const [notification, setNotification] = useState(null);
+
+  // Phone number live validation
+  const phoneValidation = useMemo(() => {
+    return validateIndianMobile(billTo.phone);
+  }, [billTo.phone]);
+
+  // Inter-state tax determination based on customer billing state vs supplier state (Bihar)
+  const isInterState = useMemo(() => {
+    return checkIsInterState(DEFAULT_SUPPLIER_STATE, billTo.state);
+  }, [billTo.state]);
 
   // Sync Ship To if "Same as Bill To" is active
   const handleBillToChange = (field, value) => {
@@ -126,6 +148,7 @@ export default function CreateBill() {
     if (checked) {
       setShipTo({
         customerName: billTo.customerName,
+        phone: billTo.phone,
         addressLine1: billTo.addressLine1,
         addressLine2: billTo.addressLine2,
         city: billTo.city,
@@ -142,6 +165,8 @@ export default function CreateBill() {
       updated[index][field] = Math.max(1, parseInt(value, 10) || 1);
     } else if (field === 'unitPrice') {
       updated[index][field] = Math.max(0, parseFloat(value) || 0);
+    } else if (field === 'gstRate') {
+      updated[index][field] = Number(value) || 0;
     } else {
       updated[index][field] = value;
     }
@@ -154,9 +179,9 @@ export default function CreateBill() {
       {
         id: Date.now(),
         productName: `Product ${products.length + 1}`,
-        hsn: 'XXXX',
         quantity: 1,
         unitPrice: 100,
+        gstRate: DEFAULT_GST_RATE, // 18% default rate for new items
       },
     ]);
   };
@@ -169,18 +194,13 @@ export default function CreateBill() {
     setProducts(products.filter((_, idx) => idx !== index));
   };
 
-  // Dynamic Calculations
-  const subtotal = useMemo(() => {
-    return products.reduce((acc, p) => acc + (Number(p.quantity) || 0) * (Number(p.unitPrice) || 0), 0);
-  }, [products]);
+  // Dynamic Calculations using the Accurate GST Engine
+  const invoiceCalculations = useMemo(() => {
+    return calculateInvoiceTotals(products, shippingCharge, isInterState);
+  }, [products, shippingCharge, isInterState]);
 
-  const parsedShipping = useMemo(() => {
-    const val = parseFloat(shippingCharge);
-    return isNaN(val) || val < 0 ? 0 : val;
-  }, [shippingCharge]);
-
-  const tax = useMemo(() => subtotal * 0.18, [subtotal]);
-  const grandTotal = useMemo(() => subtotal + tax + parsedShipping, [subtotal, tax, parsedShipping]);
+  const { subtotal, totalGST, totalCGST, totalSGST, totalIGST, grandTotal } = invoiceCalculations;
+  const parsedShipping = invoiceCalculations.shippingCharge;
   const amountInWords = useMemo(() => numberToIndianWords(grandTotal), [grandTotal]);
 
   // Handle PDF Generation and Download
@@ -189,6 +209,15 @@ export default function CreateBill() {
 
     if (!billTo.customerName.trim()) {
       setNotification({ type: 'danger', message: 'Please enter the Customer Name for Bill To.' });
+      return;
+    }
+
+    // Validate phone number if entered (field is optional)
+    if (!phoneValidation.isValid) {
+      setNotification({
+        type: 'danger',
+        message: phoneValidation.error || 'Please enter a valid 10-digit Indian mobile number.',
+      });
       return;
     }
 
@@ -206,10 +235,14 @@ export default function CreateBill() {
         invoiceDate,
         orderNumber,
         paymentMode,
-        billTo,
+        billTo: {
+          ...billTo,
+          phone: phoneValidation.sanitized,
+        },
         shipTo: sameAsBillTo
           ? {
               customerName: billTo.customerName,
+              phone: phoneValidation.sanitized,
               addressLine1: billTo.addressLine1,
               addressLine2: billTo.addressLine2,
               city: billTo.city,
@@ -217,10 +250,15 @@ export default function CreateBill() {
               pin: billTo.pin,
             }
           : shipTo,
-        products,
+        products: invoiceCalculations.items,
         shippingCharge: parsedShipping,
         subtotal,
-        tax,
+        tax: totalGST,
+        totalGST,
+        totalCGST,
+        totalSGST,
+        totalIGST,
+        isInterState,
         grandTotal,
       };
 
@@ -247,7 +285,7 @@ export default function CreateBill() {
         }
       }
 
-      // If Content-Disposition header was not present, generate unique timestamped filename fallback
+      // Fallback filename if header absent
       if (!downloadFilename) {
         const cleanBase = (invoiceNumber || 'Invoice')
           .toString()
@@ -271,7 +309,7 @@ export default function CreateBill() {
       const blob = await response.blob();
       const pdfBlob = new Blob([blob], { type: 'application/pdf' });
 
-      // Verify that the file is a valid PDF and begins with the PDF file signature: %PDF-
+      // Verify that the file is a valid PDF signature %PDF-
       const firstBytesBuffer = await pdfBlob.slice(0, 5).arrayBuffer();
       const signature = new TextDecoder('ascii').decode(firstBytesBuffer);
       if (signature !== '%PDF-') {
@@ -289,17 +327,16 @@ export default function CreateBill() {
       link.click();
       link.remove();
 
-      // Clean up Blob URL after delay so browser download manager can read the blob
       setTimeout(() => {
         window.URL.revokeObjectURL(downloadUrl);
       }, 5000);
 
       setNotification({
         type: 'success',
-        message: `Success! Invoice "${downloadFilename}" generated and downloaded in official Ekora Bazaar format with 18% tax.`,
+        message: `Success! Invoice "${downloadFilename}" generated and downloaded in official Ekora Bazaar format with item-wise GST.`,
       });
     } catch (err) {
-      console.error(err);
+      console.error('Invoice PDF error:', err);
       setNotification({
         type: 'danger',
         message: `Failed to generate PDF: ${err.message}. Please verify the server is running.`,
@@ -351,7 +388,7 @@ export default function CreateBill() {
               <p className="panel-subtitle">Document numbering, order reference, and payment mode</p>
             </div>
             <div className="tab-badge tax">
-              18% GST Auto-Calculated
+              {isInterState ? 'Inter-State (IGST)' : 'Intra-State (CGST + SGST)'}
             </div>
           </div>
 
@@ -421,20 +458,43 @@ export default function CreateBill() {
             </div>
 
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Customer Name *</label>
+              <label className="form-label" htmlFor="billto-customer-name">Customer Name *</label>
               <input
+                id="billto-customer-name"
                 className="form-input"
                 type="text"
                 required
-                placeholder="e.g. Customer Name"
+                placeholder="e.g. Rahul Sharma"
                 value={billTo.customerName}
                 onChange={(e) => handleBillToChange('customerName', e.target.value)}
               />
             </div>
 
+            {/* NEW: Customer Phone Number Field */}
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Address Line 1 *</label>
+              <label className="form-label" htmlFor="billto-phone">
+                Customer Phone Number <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--text-muted)' }}>(Optional)</span>
+              </label>
               <input
+                id="billto-phone"
+                className={`form-input ${!phoneValidation.isValid ? 'form-input-error' : ''}`}
+                type="tel"
+                placeholder="e.g. 9876543210 (10-digit mobile)"
+                value={billTo.phone}
+                onChange={(e) => handleBillToChange('phone', e.target.value)}
+                maxLength={15}
+              />
+              {!phoneValidation.isValid && (
+                <span style={{ fontSize: '0.78rem', color: 'var(--danger)', marginTop: '0.2rem', display: 'block' }}>
+                  ⚠️ {phoneValidation.error}
+                </span>
+              )}
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+              <label className="form-label" htmlFor="billto-addr1">Address Line 1 *</label>
+              <input
+                id="billto-addr1"
                 className="form-input"
                 type="text"
                 required
@@ -445,8 +505,9 @@ export default function CreateBill() {
             </div>
 
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Address Line 2</label>
+              <label className="form-label" htmlFor="billto-addr2">Address Line 2</label>
               <input
+                id="billto-addr2"
                 className="form-input"
                 type="text"
                 placeholder="e.g. Area, Colony, Street"
@@ -457,8 +518,9 @@ export default function CreateBill() {
 
             <div className="grid-3" style={{ marginBottom: '0.85rem' }}>
               <div className="form-group">
-                <label className="form-label">City *</label>
+                <label className="form-label" htmlFor="billto-city">City *</label>
                 <input
+                  id="billto-city"
                   className="form-input"
                   type="text"
                   required
@@ -469,8 +531,9 @@ export default function CreateBill() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">State *</label>
+                <label className="form-label" htmlFor="billto-state">State *</label>
                 <input
+                  id="billto-state"
                   className="form-input"
                   type="text"
                   required
@@ -481,8 +544,9 @@ export default function CreateBill() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">PIN *</label>
+                <label className="form-label" htmlFor="billto-pin">PIN *</label>
                 <input
+                  id="billto-pin"
                   className="form-input"
                   type="text"
                   required
@@ -494,8 +558,9 @@ export default function CreateBill() {
             </div>
 
             <div className="form-group">
-              <label className="form-label">GSTIN (if any)</label>
+              <label className="form-label" htmlFor="billto-gstin">GSTIN (if any)</label>
               <input
+                id="billto-gstin"
                 className="form-input"
                 type="text"
                 placeholder="e.g. 10AANFE1465G1ZR or leave blank"
@@ -523,8 +588,9 @@ export default function CreateBill() {
             </div>
 
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Customer Name *</label>
+              <label className="form-label" htmlFor="shipto-customer-name">Customer Name *</label>
               <input
+                id="shipto-customer-name"
                 className="form-input"
                 type="text"
                 required
@@ -535,9 +601,27 @@ export default function CreateBill() {
               />
             </div>
 
+            {/* Customer Phone Number in Ship To */}
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Address Line 1 *</label>
+              <label className="form-label" htmlFor="shipto-phone">
+                Customer Phone Number <span style={{ fontWeight: 400, textTransform: 'none', color: 'var(--text-muted)' }}>(Optional)</span>
+              </label>
               <input
+                id="shipto-phone"
+                className="form-input"
+                type="tel"
+                disabled={sameAsBillTo}
+                placeholder="e.g. 9876543210 (10-digit mobile)"
+                value={shipTo.phone}
+                onChange={(e) => handleShipToChange('phone', e.target.value)}
+                maxLength={15}
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '0.85rem' }}>
+              <label className="form-label" htmlFor="shipto-addr1">Address Line 1 *</label>
+              <input
+                id="shipto-addr1"
                 className="form-input"
                 type="text"
                 required
@@ -549,8 +633,9 @@ export default function CreateBill() {
             </div>
 
             <div className="form-group" style={{ marginBottom: '0.85rem' }}>
-              <label className="form-label">Address Line 2</label>
+              <label className="form-label" htmlFor="shipto-addr2">Address Line 2</label>
               <input
+                id="shipto-addr2"
                 className="form-input"
                 type="text"
                 disabled={sameAsBillTo}
@@ -562,8 +647,9 @@ export default function CreateBill() {
 
             <div className="grid-3">
               <div className="form-group">
-                <label className="form-label">City *</label>
+                <label className="form-label" htmlFor="shipto-city">City *</label>
                 <input
+                  id="shipto-city"
                   className="form-input"
                   type="text"
                   required
@@ -575,8 +661,9 @@ export default function CreateBill() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">State *</label>
+                <label className="form-label" htmlFor="shipto-state">State *</label>
                 <input
+                  id="shipto-state"
                   className="form-input"
                   type="text"
                   required
@@ -588,8 +675,9 @@ export default function CreateBill() {
               </div>
 
               <div className="form-group">
-                <label className="form-label">PIN *</label>
+                <label className="form-label" htmlFor="shipto-pin">PIN *</label>
                 <input
+                  id="shipto-pin"
                   className="form-input"
                   type="text"
                   required
@@ -603,12 +691,12 @@ export default function CreateBill() {
           </div>
         </div>
 
-        {/* Section 3: Products Table */}
+        {/* Section 3: Products Table (Item-wise GST Dropdown, HSN Column Removed) */}
         <div className="panel-card">
           <div className="panel-header">
             <div>
               <h2 className="panel-title">4. Products Table</h2>
-              <p className="panel-subtitle">Product Name, HSN, Quantity, and Unit Price (Amount = Qty × Unit Price)</p>
+              <p className="panel-subtitle">Select custom item-wise GST rate (0%, 5%, 12%, 18%, 28%) for each product</p>
             </div>
             <button
               type="button"
@@ -625,16 +713,17 @@ export default function CreateBill() {
                 <tr>
                   <th style={{ width: '45px', textAlign: 'center' }}>S. No.</th>
                   <th>Product Name</th>
-                  <th style={{ width: '110px', textAlign: 'center' }}>HSN</th>
-                  <th style={{ width: '90px', textAlign: 'center' }}>Qty</th>
-                  <th style={{ width: '140px', textAlign: 'right' }}>Unit Price (₹)</th>
-                  <th style={{ width: '140px', textAlign: 'right' }}>Amount (₹)</th>
-                  <th style={{ width: '60px', textAlign: 'center' }}>Action</th>
+                  <th style={{ width: '80px', textAlign: 'center' }}>Qty</th>
+                  <th style={{ width: '130px', textAlign: 'right' }}>Unit Price (₹)</th>
+                  <th style={{ width: '110px', textAlign: 'center' }}>GST Rate (%)</th>
+                  <th style={{ width: '115px', textAlign: 'right' }}>GST Amt (₹)</th>
+                  <th style={{ width: '130px', textAlign: 'right' }}>Total (₹)</th>
+                  <th style={{ width: '55px', textAlign: 'center' }}>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {products.map((prod, index) => {
-                  const lineAmount = (Number(prod.quantity) || 0) * (Number(prod.unitPrice) || 0);
+                  const lineCalc = calculateItemGST(prod, isInterState);
                   return (
                     <tr key={prod.id}>
                       <td style={{ textAlign: 'center', color: 'var(--text-secondary)', fontWeight: 600 }}>
@@ -649,16 +738,6 @@ export default function CreateBill() {
                           required
                           value={prod.productName}
                           onChange={(e) => handleProductChange(index, 'productName', e.target.value)}
-                        />
-                      </td>
-                      <td>
-                        <input
-                          type="text"
-                          className="form-input"
-                          style={{ textAlign: 'center' }}
-                          placeholder="XXXX"
-                          value={prod.hsn}
-                          onChange={(e) => handleProductChange(index, 'hsn', e.target.value)}
                         />
                       </td>
                       <td>
@@ -684,8 +763,27 @@ export default function CreateBill() {
                           onChange={(e) => handleProductChange(index, 'unitPrice', e.target.value)}
                         />
                       </td>
+                      {/* Item-wise GST Dropdown */}
+                      <td>
+                        <select
+                          className="form-select"
+                          style={{ width: '100%', textAlign: 'center', fontWeight: 600 }}
+                          value={prod.gstRate !== undefined ? prod.gstRate : DEFAULT_GST_RATE}
+                          onChange={(e) => handleProductChange(index, 'gstRate', e.target.value)}
+                          aria-label={`GST rate for product ${index + 1}`}
+                        >
+                          {GST_RATES.map((rate) => (
+                            <option key={rate} value={rate}>
+                              {rate}%
+                            </option>
+                          ))}
+                        </select>
+                      </td>
+                      <td className="td-amount" style={{ color: 'var(--text-secondary)' }}>
+                        ₹ {formatCurrency(lineCalc.gstAmount)}
+                      </td>
                       <td className="td-amount">
-                        ₹ {lineAmount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                        ₹ {formatCurrency(lineCalc.lineTotal)}
                       </td>
                       <td style={{ textAlign: 'center' }}>
                         <button
@@ -771,7 +869,7 @@ export default function CreateBill() {
                   Zero-Rated Shipping (0% GST)
                 </div>
                 <div style={{ fontSize: '0.8rem', color: '#047857', lineHeight: 1.4 }}>
-                  This amount is added directly to the Grand Total with <strong>₹ 0.00 GST</strong>. Standard 18% GST applies strictly to the product subtotal.
+                  This amount is added directly to the Grand Total with <strong>₹ 0.00 GST</strong>. Flexible GST rates apply individually to each product.
                 </div>
               </div>
             </div>
@@ -783,7 +881,7 @@ export default function CreateBill() {
           <div className="panel-header">
             <div>
               <h2 className="panel-title">6. Bill Summary & Grand Total</h2>
-              <p className="panel-subtitle">Official totals breakdown and final amount payable</p>
+              <p className="panel-subtitle">Official totals breakdown with item-wise GST and final amount payable</p>
             </div>
           </div>
 
@@ -796,18 +894,45 @@ export default function CreateBill() {
               <div style={{ fontSize: '0.95rem', color: '#1e293b', fontStyle: 'italic', fontWeight: 500, lineHeight: 1.5 }}>
                 {amountInWords}
               </div>
+              <div style={{ marginTop: '1rem', paddingTop: '0.75rem', borderTop: '1px solid var(--border-main)', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
+                <strong>Tax Regime: </strong>
+                {isInterState ? (
+                  <span>Inter-State Transaction (IGST applicable)</span>
+                ) : (
+                  <span>Intra-State Transaction (CGST + SGST applicable)</span>
+                )}
+              </div>
             </div>
 
             {/* Official Totals Box */}
             <div className="bill-summary-card">
               <div className="summary-row">
-                <span style={{ fontWeight: 600 }}>Products Subtotal:</span>
-                <strong>₹ {subtotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <span style={{ fontWeight: 600 }}>Taxable Subtotal:</span>
+                <strong>₹ {formatCurrency(subtotal)}</strong>
               </div>
 
+              {/* Tax Breakdowns */}
+              {!isInterState ? (
+                <>
+                  <div className="summary-row" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                    <span>CGST (Central Tax):</span>
+                    <span>₹ {formatCurrency(totalCGST)}</span>
+                  </div>
+                  <div className="summary-row" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                    <span>SGST (State Tax):</span>
+                    <span>₹ {formatCurrency(totalSGST)}</span>
+                  </div>
+                </>
+              ) : (
+                <div className="summary-row" style={{ color: 'var(--text-secondary)', fontSize: '0.85rem' }}>
+                  <span>IGST (Integrated Tax):</span>
+                  <span>₹ {formatCurrency(totalIGST)}</span>
+                </div>
+              )}
+
               <div className="summary-row tax-highlight">
-                <span>Total Tax (18% GST):</span>
-                <span>₹ {tax.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                <span>Total GST:</span>
+                <span>₹ {formatCurrency(totalGST)}</span>
               </div>
 
               <div className="summary-row shipping-highlight">
@@ -815,7 +940,7 @@ export default function CreateBill() {
                   <span>Shipping (0% GST):</span>
                   <span className="tab-badge zero-gst" style={{ fontSize: '0.65rem' }}>0% GST</span>
                 </span>
-                <strong>₹ {parsedShipping.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</strong>
+                <strong>₹ {formatCurrency(parsedShipping)}</strong>
               </div>
 
               <div className="summary-divider"></div>
@@ -823,7 +948,7 @@ export default function CreateBill() {
               <div className="summary-total">
                 <span className="summary-total-label">Grand Total (₹):</span>
                 <span className="summary-total-amount">
-                  ₹ {grandTotal.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  ₹ {formatCurrency(grandTotal)}
                 </span>
               </div>
             </div>
